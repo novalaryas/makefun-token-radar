@@ -1,31 +1,31 @@
-// Token radar model v2: fitted on the snapshot's own token-bearing peers, kept only where held-out
-// tests support it. Every number below was measured on this snapshot (2026-11-14, 758 protocols)
-// before this file was written; the dashboard prints the same numbers.
+// Token radar model v3. Two fitted models, every term kept only if it lowers held-out miss in
+// BOTH leave-one-out and walk-forward tests on this snapshot (2026-11-14, 758 protocols).
 //
-// VALUE MODEL. Peers: the 128 protocols with mcap_usd > 0 and tvl_usd > 0. Response: log10(mcap).
-// Candidate terms were scored by 5-fold cross-validation (seed 7) and a walk-forward split by
-// listed_at (train oldest 70%, test newest 30%):
-//   intercept only ............ CV RMSE 1.0097
-//   + log10(TVL) .............. CV RMSE 0.9094
-//   + log10(TVL)^2 ............ CV RMSE 0.9216  (dropped: worse held out)
-//   + chains .................. CV RMSE 0.9175  (dropped)
-//   + age ..................... CV RMSE 0.9367  (dropped)
-//   + change_7d (clamped) ..... CV RMSE 0.9024  (kept)
-//   category median ratio ..... CV RMSE 0.9906  (dropped)
-// Kept model, refit on all 128 peers:
-//   log10(implied) = 2.8229 + 0.5292 * log10(tvl_usd) - 1.6129 * clamp(change_7d, -60, 120) / 100
-// Walk-forward RMSE 0.9874 (n=29). The negative growth sign is the data's: among peers, a hot
-// 7-day TVL print predicts a LOWER mcap/TVL, consistent with TVL arriving after the token priced.
-// Interval: 80% band from in-sample residual quantiles (q10 -1.286, q90 +0.985 in log10), printed
-// as a range, never as false precision.
+// VALUE (128 peers with mcap>0, tvl>0; response ln(mcap/TVL); miss = exp(mean |log error|)):
+//   flat multiple (median ratio) .... LOO x5.926  WF x7.252
+//   + size curve ln(TVL) ............ LOO x4.933  WF x5.467  KEPT
+//   + category ridge (lambda 10) .... LOO x4.849  WF x5.345  KEPT
+//   + 7-day growth .................. LOO x4.954  WF x5.265  tested, not kept (LOO worsens)
+//   + age ........................... LOO x4.907  WF x7.194  tested, not kept
+//   + chain count ................... LOO x4.962  WF x5.808  tested, not kept
+// Kept: ln(launch/TVL) = -1.1101 (se .207) - 0.4891 (se .083) * (ln TVL - 17) + category offset.
+// Range honesty (LOO): within x3 46.1%, inside P25-P75 49.2% (stated 50%), inside P10-P90 78.1%
+// (stated 80%). Walk-forward: within x3 48.3%, P25-P75 48.3%, P10-P90 75.9%.
 //
-// TOKEN ODDS. Category token rates over all 758 protocols, shrunk toward the global rate 0.5488
-// with k=10 pseudo-counts. Held-out Brier 0.2274 vs 0.2487 for the global rate alone (5-fold,
-// seed 11), so category odds are kept; k=10 beat k=0/5/20/40.
+// ODDS (logistic on all 758; Brier, 10-fold + walk-forward):
+//   base rate ............ 0.2484 / 0.2814
+//   + years listed ....... 0.2311 / 0.2325  KEPT
+//   + category share ..... 0.2113 / 0.2160  KEPT (shrunk k=10)
+//   + size curve ......... 0.2100 / 0.2138  KEPT
+//   + 7-day growth ....... 0.2079 / 0.2128  KEPT (helps odds, failed value)
+//   + chain count ........ 0.2065 / 0.2125  KEPT
+// Odds are the peers' record, not a forecast: token share by age band is 0-1y 32%, 1-2y 39%,
+// 2-3y 55%, 3y+ 79% of dated protocols recording a token.
 //
-// FARM VERDICT. Scenario math, stated on the dashboard: minimum viable capital by TVL tier;
-// expected capture = EV x (capital / TVL) x 10 early-activity multiplier, over the plan's hours.
-// It is a sizing aid under a printed assumption, not a promised return.
+// IMPLIED = launch value x token odds. FARM VERDICT is scenario math (printed on the page):
+// expected drop = implied x (plan / (TVL + plan)) x 5 early-activity factor; net subtracts
+// gas/fees and a 5%/yr capital charge; $/hour divides by active hours. FARM >= $10/h net,
+// MARGINAL > $0, SKIP otherwise, at the default $25,000 plan.
 
 export interface SnapshotProtocol {
   slug: string;
@@ -49,41 +49,85 @@ export interface Snapshot {
 }
 
 export interface ModelConstants {
-  intercept: number;
-  logtvl_coef: number;
-  change_coef: number;
-  change_floor: number;
-  change_cap: number;
+  value_const: number;
+  value_slope: number;
+  value_const_se: number;
+  value_slope_se: number;
   resid_q10: number;
+  resid_q25: number;
+  resid_q75: number;
   resid_q90: number;
-  odds_global: number;
-  odds_shrink_k: number;
-  cv_rmse: number;
-  walkforward_rmse: number;
+  loo_miss: number;
+  wf_miss: number;
+  flat_loo_miss: number;
+  flat_wf_miss: number;
+  odds_const: number;
+  odds_years: number;
+  odds_catshare: number;
+  odds_size: number;
+  odds_chg: number;
+  odds_chains: number;
   odds_brier: number;
-  odds_brier_global: number;
+  odds_brier_base: number;
   peers: number;
+  plan_default_usd: number;
 }
 
 export const MODEL: ModelConstants = {
-  intercept: 2.8229,
-  logtvl_coef: 0.5292,
-  change_coef: -1.6129,
-  change_floor: -60,
-  change_cap: 120,
-  resid_q10: -1.286,
-  resid_q90: 0.985,
-  odds_global: 0.5488,
-  odds_shrink_k: 10,
-  cv_rmse: 0.9024,
-  walkforward_rmse: 0.9874,
-  odds_brier: 0.2274,
-  odds_brier_global: 0.2487,
+  value_const: -1.1101,
+  value_slope: -0.4891,
+  value_const_se: 0.2071,
+  value_slope_se: 0.0832,
+  resid_q10: -2.493,
+  resid_q25: -1.14,
+  resid_q75: 1.361,
+  resid_q90: 2.032,
+  loo_miss: 4.849,
+  wf_miss: 5.345,
+  flat_loo_miss: 5.926,
+  flat_wf_miss: 7.252,
+  odds_const: -3.688,
+  odds_years: 0.3854,
+  odds_catshare: 5.0448,
+  odds_size: 0.0958,
+  odds_chg: -1.5021,
+  odds_chains: 0.0897,
+  odds_brier: 0.2065,
+  odds_brier_base: 0.2484,
   peers: 128,
+  plan_default_usd: 25000,
 };
 
-export const MODEL_VERSION = 'radar-2-fitted';
-export const EARLY_ROWS = 200;
+/** Category offsets from the ridge fit (lambda 10); unseen categories take 0. */
+export const CATEGORY_OFFSETS: Record<string, number> = {
+  'AI Agents': -0.01, 'Basis Trading': 0.433, 'Bridge': -0.047, 'CDP': -0.278, 'CEX': 0.345,
+  'Canonical Bridge': 0.315, 'Chain': 0.178, 'Collateral Management': 0.301, 'Cross Chain Bridge': 0.18,
+  'DOR': -0.084, 'Decentralized AI': 0.19, 'Derivatives': 0.212, 'Dexs': 0.044, 'Dual-Token Stablecoin': -0.16,
+  'Indexes': -0.028, 'Launchpad': -0.006, 'Lending': -0.372, 'Leveraged Farming': -0.005,
+  'Liquid Restaking': -0.211, 'Liquid Staking': -0.481, 'Liquidity Manager': -0.318, 'NFT Marketplace': 0.123,
+  'Onchain Capital Allocator': -0.262, 'Options': 0.09, 'Payments': -0.208, 'Prediction Market': 0.588,
+  'Privacy': 0.262, 'RWA': 0.071, 'Restaking': -0.029, 'Risk Curators': 0.168, 'Staking Pool': -0.513,
+  'Token Locker': 0.198, 'Yield': -0.364, 'Yield Aggregator': -0.321,
+};
+
+/** Shrunk category token shares (k=10 toward the global 0.5488), fitted on all 758. */
+export const CATEGORY_SHARES: Record<string, number> = {
+  'AI Agents': 0.624, 'Algo-Stables': 0.624, 'Anchor BTC': 0.535, 'Basis Trading': 0.596, 'Bridge': 0.5,
+  'CDP': 0.516, 'CDP Manager': 0.541, 'CEX': 0.295, 'Canonical Bridge': 0.535, 'CeDeFi': 0.499, 'Chain': 0.472,
+  'Collateral Management': 0.59, 'Collateral Markets': 0.499, 'Cross Chain Bridge': 0.676, 'Crypto Card Issuer': 0.541,
+  'DOR': 0.59, 'Decentralized AI': 0.59, 'Decentralized BTC': 0.499, 'Derivatives': 0.514, 'Dexs': 0.72,
+  'Dual-Token Stablecoin': 0.535, 'Farm': 0.499, 'Governance Incentives': 0.541, 'Indexes': 0.656, 'Insurance': 0.541,
+  'Interest Rate Derivatives': 0.499, 'Launchpad': 0.678, 'Lending': 0.759, 'Leveraged Farming': 0.593,
+  'Liquid Restaking': 0.605, 'Liquid Staking': 0.517, 'Liquidity Manager': 0.583, 'NFT Marketplace': 0.59,
+  'OTC Marketplace': 0.499, 'Onchain Capital Allocator': 0.371, 'Options': 0.653, 'Options Vault': 0.499,
+  'Payments': 0.576, 'Prediction Market': 0.499, 'Privacy': 0.606, 'RWA': 0.523, 'Reserve Currency': 0.59,
+  'Restaked BTC': 0.499, 'Restaking': 0.593, 'Risk Curators': 0.214, 'Stablecoin Issuer': 0.59,
+  'Stablecoin Wrapper': 0.457, 'Staking Pool': 0.499, 'Synthetics': 0.653, 'Token Locker': 0.699,
+  'Uncollateralized Lending': 0.499, 'Yield': 0.581, 'Yield Aggregator': 0.591,
+};
+
+export const MODEL_VERSION = 'radar-3-fitted';
+export const EARLY_ROWS = 400;
 export const LIVE_ROWS = 24;
 
 export interface FarmStep {
@@ -119,25 +163,32 @@ export interface BoardRow {
 
 export interface RadarRow {
   rank: number;
+  rank_lo: number;
+  rank_hi: number;
   slug: string;
   name: string;
   category: string | null;
   chains: string[];
   tvl_usd: number;
   change_7d: number | null;
-  mcap_usd: number | null;
   listed_at: string | null;
   age_days: number | null;
-  implied_value_usd: number;
-  growth_multiplier: number;
-  maturity_multiplier: number;
+  launch_value_usd: number;
   odds: number;
-  value_lo_usd: number;
-  value_hi_usd: number;
-  ev_usd: number;
-  verdict_usd_per_hour: number;
-  capital_usd: number;
+  implied_value_usd: number;
+  p25_usd: number;
+  p75_usd: number;
+  verdict: 'FARM' | 'MARGINAL' | 'SKIP';
+  net_per_hour: number;
+  expected_drop_usd: number;
+  gas_fees_usd: number;
+  capital_charge_usd: number;
+  net_usd: number;
+  plan_usd: number;
+  hold_days: number;
+  active_hours: number;
   on_watchlist: boolean;
+  farm_steps: string[];
 }
 
 export interface LiveRow {
@@ -161,8 +212,10 @@ export interface RadarData {
   early_size: number;
   live_size: number;
   protocol_total: number;
-  token_bearing: number;
-  pretoken_total: number;
+  accounting: Record<string, number>;
+  total_tvl_usd: number;
+  total_implied_usd: number;
+  farm_count: number;
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -175,10 +228,7 @@ export class SnapshotError extends Error {
 }
 
 const DAY_MS = 86_400_000;
-
-function finite(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
+const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 export function ageDays(asOf: string, listedAt: string | null): number | null {
   if (listedAt === null) return null;
@@ -188,16 +238,23 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** Fitted implied launch value: log10(mcap) regression on the snapshot's token-bearing peers. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
-  const age = ageDays(asOf, protocol.listed_at);
-  const growthPct = Math.min(model.change_cap, Math.max(model.change_floor, finite(protocol.change_7d, 0)));
-  const logImplied = model.intercept + model.logtvl_coef * Math.log10(Math.max(1, protocol.tvl_usd)) + (model.change_coef * growthPct) / 100;
-  const implied = Math.max(1, Math.round(Math.pow(10, logImplied)));
-  // growth/maturity multipliers kept for dashboard continuity: growth shows the change term's
-  // factor, maturity is 1 (the age term failed held-out tests and was dropped).
-  const growthMult = Math.pow(10, (model.change_coef * growthPct) / 100);
-  return { implied, growthPct, growthMult, maturityMult: 1, age };
+/** If-it-launches value from the fitted size curve + category ridge. */
+export function launchValue(p: SnapshotProtocol, model: ModelConstants): number {
+  const lt = Math.log(Math.max(1, p.tvl_usd));
+  const off = CATEGORY_OFFSETS[p.category ?? '(none)'] ?? 0;
+  return Math.max(1, Math.round(p.tvl_usd * Math.exp(model.value_const + model.value_slope * (lt - 17) + off)));
+}
+
+/** Token odds from the fitted logistic (years, category share, size, growth, chains). */
+export function tokenOdds(p: SnapshotProtocol, asOf: string, model: ModelConstants): number {
+  const age = ageDays(asOf, p.listed_at);
+  const years = age === null ? 1 : age / 365.25;
+  const share = CATEGORY_SHARES[p.category ?? '(none)'] ?? 0.5488;
+  const chg = Math.min(120, Math.max(-60, p.change_7d ?? 0)) / 100;
+  const z = model.odds_const + model.odds_years * years + model.odds_catshare * share +
+    model.odds_size * (Math.log(Math.max(1, p.tvl_usd)) - 17) + model.odds_chg * chg +
+    model.odds_chains * Math.min(p.chains.length, 8);
+  return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
 }
 
 const VERSIONED = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
@@ -214,30 +271,73 @@ function hasToken(p: SnapshotProtocol): boolean {
   return Boolean(p.gecko_id || p.symbol || (p.mcap_usd !== null && p.mcap_usd > 0));
 }
 
-/** Category token odds with k=10 shrinkage toward the global rate, fitted on the whole snapshot. */
-export function categoryOdds(snapshot: Snapshot, model: ModelConstants): Map<string, number> {
-  const counts = new Map<string, { n: number; t: number }>();
-  for (const p of snapshot.protocols) {
-    const key = p.category ?? '(none)';
-    const c = counts.get(key) ?? { n: 0, t: 0 };
-    c.n += 1;
-    if (hasToken(p)) c.t += 1;
-    counts.set(key, c);
-  }
-  const odds = new Map<string, number>();
-  for (const [key, c] of counts) odds.set(key, (c.t + model.odds_shrink_k * model.odds_global) / (c.n + model.odds_shrink_k));
-  return odds;
-}
-
 function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
 
-export interface BoardSummary {
-  watchlist_size: number;
-  board_size: number;
-  early_size: number;
-  live_size: number;
+function holdDaysFor(age: number | null): number {
+  if (age === null) return 35;
+  if (age < 180) return 49;
+  if (age < 365) return 42;
+  return 35;
+}
+
+function chainOf(p: SnapshotProtocol): string {
+  return p.chains.length > 0 ? p.chains[0]! : 'its main chain';
+}
+
+function actionFor(p: SnapshotProtocol, plan: number, chain: string): string {
+  const c = (p.category ?? '').toLowerCase();
+  const name = p.name;
+  const amt = `$${plan.toLocaleString('en-US')}`;
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Supply ${amt} of USDC to ${name} on ${chain} and keep the position open.`;
+  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm')) return `Provide ${amt} of liquidity to ${name}'s main pool on ${chain} and keep the position open.`;
+  if (c.includes('bridge')) return `Bridge ${amt} of USDC to ${chain} through ${name} and use the bridged funds in its app.`;
+  if (c.includes('staking') || c.includes('restak')) return `Stake ${amt} of the chain's staking asset through ${name} and keep the receipt.`;
+  if (c.includes('perpetual') || c.includes('derivative')) return `Deposit ${amt} of USDC as margin on ${name} and open one small hedge.`;
+  if (c.includes('prediction')) return `Fund ${amt} and place one market position on ${name}.`;
+  if (c.includes('curator') || c.includes('allocator')) return `Deposit ${amt} into a ${name} vault on ${chain} and keep the shares.`;
+  if (c.includes('stable')) return `Mint or deposit ${amt} of the stable asset through ${name} on ${chain}.`;
+  if (c.includes('rwa')) return `Mint ${amt} of the protocol's yield asset on ${chain} and hold it.`;
+  if (c.includes('insurance')) return `Buy ${amt} of cover from ${name} on ${chain} and keep the policy.`;
+  return `Deposit ${amt} of USDC into ${name} on ${chain} and keep the position open.`;
+}
+
+export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
+  const chain = chainOf(p);
+  const plan = MODEL.plan_default_usd;
+  const hold = holdDaysFor(age);
+  return [
+    { text: `Use a fresh wallet holding only the $${plan.toLocaleString('en-US')} plan funds; keep the seed phrase offline.`, cost: 'under $3 of gas', time: '5 minutes' },
+    { text: actionFor(p, plan, chain), cost: 'about $8 of gas and fees', time: '15 minutes to set up' },
+    { text: `Add a second qualifying action in week one, such as a borrow, swap, vote or second deposit.`, cost: 'about $4 of gas', time: '10 minutes' },
+    { text: `Make one qualifying action each week so activity spans more than one snapshot.`, cost: 'about $2 of gas a week', time: '10 minutes a week' },
+    { text: `Hold the position for at least ${hold} days; do not chase points with extra capital beyond the plan.`, cost: 'capital stays in the position', time: `${hold} days` },
+    { text: `Check the protocol's own points or rewards page weekly; claim only from links it publishes, never pay to claim.`, cost: 'no fee to check', time: '10 minutes a week' },
+    { text: `Log the wallet, dates, costs and transactions; unwind after the claim window or if TVL falls by half.`, cost: 'about $5 of exit gas', time: '10 minutes' },
+  ];
+}
+
+export function stepText(step: FarmStep): string {
+  let s = `${step.text} Cost: ${step.cost}. Time: ${step.time}.`;
+  if (s.length > 600) s = `${s.slice(0, 596)}...`;
+  if (s.length < 20) s = `${s} Hold the position and check the protocol's own page.`;
+  return s;
+}
+
+/** Scenario budget at the default plan: expected drop, costs, net and net per active hour. */
+export function farmBudget(p: SnapshotProtocol, implied: number, age: number | null) {
+  const plan = MODEL.plan_default_usd;
+  const hold = holdDaysFor(age);
+  const weeks = Math.ceil(hold / 7);
+  const activeHours = 0.25 + weeks * (10 / 60) + 10 / 60;
+  const expectedDrop = implied * (plan / (p.tvl_usd + plan)) * 5;
+  const gasFees = 3 + 8 + 4 + weeks * 2 + 5;
+  const capitalCharge = plan * 0.05 * (hold / 365);
+  const net = expectedDrop - gasFees - capitalCharge;
+  const perHour = net / activeHours;
+  const verdict: 'FARM' | 'MARGINAL' | 'SKIP' = perHour >= 10 ? 'FARM' : perHour > 0 ? 'MARGINAL' : 'SKIP';
+  return { verdict, perHour: Math.round(perHour * 100) / 100, expectedDrop: Math.round(expectedDrop), gasFees, capitalCharge: Math.round(capitalCharge), net: Math.round(net), plan, hold, activeHours: Math.round(activeHours * 100) / 100 };
 }
 
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
@@ -254,8 +354,10 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const r = impliedValue(p, snapshot.as_of, model);
-    return { p, ...r };
+    const launch = launchValue(p, model);
+    const odds = tokenOdds(p, snapshot.as_of, model);
+    const implied = Math.max(1, Math.round(launch * odds));
+    return { p, launch, odds, implied, age: ageDays(snapshot.as_of, p.listed_at) };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
@@ -274,81 +376,14 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     age_days: s.age,
     implied_value_usd: s.implied,
     model: {
-      base_multiple: round4(s.implied / Math.max(1, s.p.tvl_usd)),
-      growth_pct: s.growthPct,
-      growth_multiplier: round4(s.growthMult),
+      base_multiple: round4(s.launch / Math.max(1, s.p.tvl_usd)),
+      growth_pct: Math.min(120, Math.max(-60, s.p.change_7d ?? 0)),
+      growth_multiplier: round4(s.odds),
       maturity_multiplier: 1,
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
   }));
-}
-
-const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
-
-export function stepText(step: FarmStep): string {
-  let s = `${step.text} Cost: ${step.cost}. Time: ${step.time}.`;
-  if (s.length > 600) s = `${s.slice(0, 596)}...`;
-  if (s.length < 20) s = `${s} Hold the position and check the protocol's own page.`;
-  return s;
-}
-
-function chainOf(p: SnapshotProtocol): string {
-  return p.chains.length > 0 ? p.chains[0]! : 'its main chain';
-}
-
-function capitalFor(p: SnapshotProtocol): number {
-  if (p.tvl_usd >= 5_000_000_000) return 250;
-  if (p.tvl_usd >= 1_000_000_000) return 150;
-  if (p.tvl_usd >= 100_000_000) return 100;
-  return 50;
-}
-
-function holdDaysFor(age: number | null): number {
-  if (age === null) return 30;
-  if (age < 180) return 60;
-  if (age < 365) return 45;
-  return 30;
-}
-
-function actionFor(p: SnapshotProtocol, capital: number, chain: string): string {
-  const c = (p.category ?? '').toLowerCase();
-  const name = p.name;
-  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Supply $${capital} of USDC to ${name} on ${chain} and keep the position open.`;
-  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm')) return `Provide $${capital} of liquidity to ${name}'s main pool on ${chain} and keep the position open.`;
-  if (c.includes('bridge')) return `Bridge $${capital} of USDC to ${chain} through ${name} and use the bridged funds in its app.`;
-  if (c.includes('staking') || c.includes('restak')) return `Stake $${capital} of the chain's staking asset through ${name} and keep the receipt.`;
-  if (c.includes('perpetual') || c.includes('derivative')) return `Deposit $${capital} of USDC as margin on ${name} and open one small hedge.`;
-  if (c.includes('prediction')) return `Fund $${capital} and place one market position on ${name}.`;
-  if (c.includes('curator') || c.includes('allocator')) return `Deposit $${capital} into a ${name} vault on ${chain} and keep the shares.`;
-  if (c.includes('stable')) return `Mint or deposit $${capital} of the stable asset through ${name} on ${chain}.`;
-  if (c.includes('rwa')) return `Mint $${capital} of the protocol's yield asset on ${chain} and hold it.`;
-  if (c.includes('insurance')) return `Buy $${capital} of cover from ${name} on ${chain} and keep the policy.`;
-  return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open.`;
-}
-
-export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
-  const chain = chainOf(p);
-  const capital = capitalFor(p);
-  const hold = holdDaysFor(age);
-  const action = actionFor(p, capital, chain);
-  return [
-    { text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`, cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
-    { text: action, cost: `$${capital} of capital and about $${capital >= 150 ? 8 : 4} of gas`, time: '15 minutes to set up' },
-    { text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`, cost: 'about $2 of gas a week', time: '10 minutes a week' },
-    { text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`, cost: `the $${capital} stays in the position`, time: `${hold} days` },
-    { text: `Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.`, cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-    { text: `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.`, cost: 'nothing but the log', time: '5 minutes' },
-  ];
-}
-
-/** Scenario verdict: expected capture per hour at minimum viable capital (assumption printed). */
-export function verdictPerHour(p: SnapshotProtocol, ev: number, age: number | null): { verdict: number; capital: number } {
-  const capital = capitalFor(p);
-  const weeks = Math.ceil(holdDaysFor(age) / 7);
-  const hours = 0.25 + weeks * (10 / 60) + 10 / 60;
-  const capture = ev * (capital / Math.max(p.tvl_usd, capital)) * 10;
-  return { verdict: Math.round((capture / hours) * 100) / 100, capital };
 }
 
 export function liveRows(snapshot: Snapshot): LiveRow[] {
@@ -359,40 +394,67 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
     .map((p) => ({ slug: p.slug, name: p.name, category: p.category, chains: p.chains, tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd, change_7d: p.change_7d }));
 }
 
+const OUT_CATEGORIES = new Set(['Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC', 'CEX']);
+
+export function accounting(snapshot: Snapshot, board: BoardRow[]): Record<string, number> {
+  const watch = new Set(snapshot.watchlist);
+  const onBoard = new Set(board.map((r) => r.slug));
+  const groups: Record<string, number> = {
+    'ranked watchlist': 0, 'ranked early below floor': 0, 'token trades, priced comp': 0,
+    'token recorded, no usable cap': 0, 'out: bridge/exchange/staking product': 0, 'out: versioned pool': 0, 'out: other pre-token': 0,
+  };
+  for (const p of snapshot.protocols) {
+    if (watch.has(p.slug)) groups['ranked watchlist']! += 1;
+    else if (onBoard.has(p.slug)) groups['ranked early below floor']! += 1;
+    else if (hasToken(p) && (p.mcap_usd ?? 0) > 0) groups['token trades, priced comp']! += 1;
+    else if (hasToken(p)) groups['token recorded, no usable cap']! += 1;
+    else if (p.category !== null && OUT_CATEGORIES.has(p.category)) groups['out: bridge/exchange/staking product']! += 1;
+    else if (VERSIONED.test(p.name)) groups['out: versioned pool']! += 1;
+    else groups['out: other pre-token']! += 1;
+  }
+  return groups;
+}
+
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
-  const odds = categoryOdds(snapshot, model);
   const watch = new Set(snapshot.watchlist);
   const index = bySlug(snapshot.protocols);
+  const byP25 = [...board].sort((a, b) => (b.implied_value_usd * Math.exp(model.resid_q25)) - (a.implied_value_usd * Math.exp(model.resid_q25)));
+  const rankAt = (list: BoardRow[], slug: string) => list.findIndex((r) => r.slug === slug) + 1;
   const rows: RadarRow[] = board.map((row) => {
     const p = index.get(row.slug)!;
-    const o = odds.get(p.category ?? '(none)') ?? model.odds_global;
-    const lo = Math.max(1, Math.round(row.implied_value_usd * Math.pow(10, model.resid_q10)));
-    const hi = Math.max(lo, Math.round(row.implied_value_usd * Math.pow(10, model.resid_q90)));
-    const ev = Math.round(row.implied_value_usd * o);
-    const { verdict, capital } = verdictPerHour(p, ev, row.age_days);
+    const launch = launchValue(p, model);
+    const odds = tokenOdds(p, snapshot.as_of, model);
+    const budget = farmBudget(p, row.implied_value_usd, row.age_days);
     return {
       rank: row.rank,
+      rank_lo: Math.min(row.rank, rankAt(byP25, row.slug)),
+      rank_hi: Math.max(row.rank, rankAt(byP25, row.slug)),
       slug: row.slug,
       name: row.name,
       category: row.category,
       chains: row.chains,
       tvl_usd: row.tvl_usd,
       change_7d: row.change_7d,
-      mcap_usd: row.mcap_usd,
       listed_at: row.listed_at,
       age_days: row.age_days,
+      launch_value_usd: launch,
+      odds: round4(odds),
       implied_value_usd: row.implied_value_usd,
-      growth_multiplier: row.model.growth_multiplier,
-      maturity_multiplier: row.model.maturity_multiplier,
-      odds: round4(o),
-      value_lo_usd: lo,
-      value_hi_usd: hi,
-      ev_usd: ev,
-      verdict_usd_per_hour: verdict,
-      capital_usd: capital,
+      p25_usd: Math.max(1, Math.round(launch * Math.exp(model.resid_q25))),
+      p75_usd: Math.max(1, Math.round(launch * Math.exp(model.resid_q75))),
+      verdict: budget.verdict,
+      net_per_hour: budget.perHour,
+      expected_drop_usd: budget.expectedDrop,
+      gas_fees_usd: budget.gasFees,
+      capital_charge_usd: budget.capitalCharge,
+      net_usd: budget.net,
+      plan_usd: budget.plan,
+      hold_days: budget.hold,
+      active_hours: budget.activeHours,
       on_watchlist: watch.has(row.slug),
+      farm_steps: row.farm_steps,
     };
   });
   const radar: RadarData = {
@@ -406,8 +468,10 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     early_size: board.filter((r) => !watch.has(r.slug)).length,
     live_size: live.length,
     protocol_total: snapshot.protocols.length,
-    token_bearing: snapshot.protocols.filter(hasToken).length,
-    pretoken_total: snapshot.protocols.filter(isPreToken).length,
+    accounting: accounting(snapshot, board),
+    total_tvl_usd: board.reduce((s, r) => s + r.tvl_usd, 0),
+    total_implied_usd: board.reduce((s, r) => s + r.implied_value_usd, 0),
+    farm_count: rows.filter((r) => r.verdict === 'FARM').length,
     rows,
     live,
   };

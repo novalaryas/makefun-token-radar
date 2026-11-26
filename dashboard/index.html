@@ -3,28 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols ranked by fitted launch value</title>
+<title>Token Radar — fitted launch value x token odds</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <header>
   <h1>Token Radar</h1>
-  <p class="sub">Pre-token protocols ranked by implied launch value, fitted on this snapshot's own token-bearing peers. Every term below survived a held-out test; every dropped term is named.</p>
-  <div id="integrity" class="strip"></div>
+  <p class="sub">Pre-token protocols ranked by implied value = if-it-launches value x token odds. Both models are fitted on this snapshot and every term survived leave-one-out and walk-forward tests — or is listed as tested, not kept.</p>
+  <div id="kpis" class="strip"></div>
+  <p id="formula" class="formula"></p>
+  <div id="accounting"></div>
+  <div id="integrity" class="checks"></div>
 </header>
 <nav>
   <button data-view="board" class="on">Board</button>
   <button data-view="detail">Protocol detail</button>
-  <button data-view="filter">Filtered view</button>
-  <button data-view="method">Method &amp; tests</button>
+  <button data-view="evidence">Out-of-sample evidence</button>
 </nav>
 <main>
   <section id="view-board"></section>
   <section id="view-detail" hidden></section>
-  <section id="view-filter" hidden></section>
-  <section id="view-method" hidden></section>
+  <section id="view-evidence" hidden></section>
 </main>
-<footer>Static page. Data: the sealed snapshot named in the strip above. No network calls; open it offline.</footer>
+<footer>Static page, no network calls. Scenario verdicts state their assumptions; odds are the peers' record, not a forecast.</footer>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>
