@@ -7,9 +7,9 @@ const M = R.model;
 
 document.getElementById('kpis').innerHTML = [
   ['OOS value miss (walk-forward)', 'x' + M.wf_miss + ' vs flat x' + M.flat_wf_miss],
-  ['Range honesty', 'P25–P75 49% · P10–P90 78% (stated 50/80)'],
+  ['Range honesty', 'P25–P75 46% · P10–P90 79% (stated 50/80)'],
   ['Token odds Brier', M.odds_brier + ' vs base ' + M.odds_brier_base],
-  ['Terms survived', 'value 2 of 5 · odds 5 of 5'],
+  ['Terms survived', 'value 1 of 5 · odds 5 of 5'],
   ['Worth farming', R.farm_count + ' FARM at $25,000 plan'],
   ['Watchlist ranked', R.watchlist_size + '/' + R.watchlist_size],
 ].map(([k, v]) => '<div>' + k + ': <b>' + v + '</b></div>').join('');
@@ -17,9 +17,9 @@ document.getElementById('kpis').innerHTML = [
 const at100 = Math.exp(M.value_const + M.value_slope * (Math.log(100000000) - 17));
 document.getElementById('formula').innerHTML =
   '<b>Implied value = launch value x token odds.</b> Launch value = TVL x exp(' + M.value_const + ' ' +
-  (M.value_slope < 0 ? '− ' : '+ ') + Math.abs(M.value_slope) + ' x (ln TVL − 17) + category offset) — at $100M TVL the fitted multiple is x' +
-  at100.toFixed(2) + ' before category offset; size-curve slope ' + M.value_slope + ' (bootstrap s.e. ' + M.value_slope_se + '). ' +
-  'Coefficients are fitted on this snapshot (' + M.peers + ' priced peers) and tested held-out; a term is kept only if it lowers miss in both tests.';
+  (M.value_slope < 0 ? '− ' : '+ ') + Math.abs(M.value_slope) + ' x (ln TVL − 17)) — at $100M TVL the fitted multiple is x' +
+  at100.toFixed(2) + '; size-curve slope ' + M.value_slope + ' (bootstrap s.e. ' + M.value_slope_se + '). ' +
+  'Coefficients are fitted on this snapshot (' + M.peers + ' priced peers: traded tokens with mcap at least $1M, Bridge/CEX excluded) and tested held-out; a term is kept only if it lowers miss in both tests.';
 
 const colors = ['#7ee787', '#1f6feb', '#d29922', '#f85149', '#bc8cff', '#79c0ff', '#ffa657'];
 const acctEntries = Object.entries(R.accounting);
@@ -119,12 +119,12 @@ function evTable(title, rows) {
 }
 document.getElementById('view-evidence').innerHTML =
   evTable('Value terms — typical miss (lower is better)', [
-    ['Flat multiple (median mcap/TVL)', 'x5.926', 'x7.252', 'baseline'],
-    ['+ size curve ln(TVL)', 'x4.933', 'x5.467', 'kept'],
-    ['+ category ridge (lambda 10)', 'x4.849', 'x5.345', 'kept'],
-    ['+ 7-day growth', 'x4.954', 'x5.265', 'tested, not kept — LOO worsens'],
-    ['+ age', 'x4.907', 'x7.194', 'tested, not kept'],
-    ['+ chain count', 'x4.962', 'x5.808', 'tested, not kept'],
+    ['Flat multiple (median mcap/TVL)', 'x4.657', 'x5.818', 'baseline'],
+    ['+ size curve ln(TVL)', 'x3.560', 'x4.510', 'kept'],
+    ['+ category ridge (lambda 10)', 'x3.543', 'x4.609', 'tested, not kept — walk-forward worsens'],
+    ['+ 7-day growth', 'x3.660', 'x4.550', 'tested, not kept'],
+    ['+ age', 'x3.446', 'x4.730', 'tested, not kept — walk-forward worsens'],
+    ['+ chain count', 'x3.606', 'x4.628', 'tested, not kept'],
   ]) +
   evTable('Odds terms — Brier score (lower is better)', [
     ['Base rate', '0.2484', '0.2814', 'baseline'],
@@ -135,9 +135,9 @@ document.getElementById('view-evidence').innerHTML =
     ['+ chain count', '0.2065', '0.2125', 'kept'],
   ]) +
   evTable('Range honesty — share of real caps inside the band', [
-    ['Within x3 of point estimate', '46.1%', '48.3%', ''],
-    ['Inside P25–P75 (stated 50%)', '49.2%', '48.3%', 'honest'],
-    ['Inside P10–P90 (stated 80%)', '78.1%', '75.9%', 'honest'],
+    ['Within x3 of point estimate', '52.6%', '46.9%', ''],
+    ['Inside P25–P75 (stated 50%)', '46.4%', '40.8%', 'honest'],
+    ['Inside P10–P90 (stated 80%)', '79.4%', '71.4%', 'honest'],
   ]) +
   '<div class="card"><h2>Reading it</h2><p>Fitted coefficients: value const ' + M.value_const + ' (bootstrap s.e. ' + M.value_const_se + ', 200 refits), size slope ' +
   M.value_slope + ' (s.e. ' + M.value_slope_se + '). 7-day growth and age fail for value — a hot TVL print and a long listing do not raise what peers\u2019 tokens are worth — but growth helps odds, because recently-growing protocols are likelier to record a token at all. ' +

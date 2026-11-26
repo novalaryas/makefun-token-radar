@@ -1,16 +1,18 @@
-// Token radar model v3. Two fitted models, every term kept only if it lowers held-out miss in
+// Token radar model v4. Two fitted models, every term kept only if it lowers held-out miss in
 // BOTH leave-one-out and walk-forward tests on this snapshot (2026-11-14, 758 protocols).
 //
-// VALUE (128 peers with mcap>0, tvl>0; response ln(mcap/TVL); miss = exp(mean |log error|)):
-//   flat multiple (median ratio) .... LOO x5.926  WF x7.252
-//   + size curve ln(TVL) ............ LOO x4.933  WF x5.467  KEPT
-//   + category ridge (lambda 10) .... LOO x4.849  WF x5.345  KEPT
-//   + 7-day growth .................. LOO x4.954  WF x5.265  tested, not kept (LOO worsens)
-//   + age ........................... LOO x4.907  WF x7.194  tested, not kept
-//   + chain count ................... LOO x4.962  WF x5.808  tested, not kept
-// Kept: ln(launch/TVL) = -1.1101 (se .207) - 0.4891 (se .083) * (ln TVL - 17) + category offset.
-// Range honesty (LOO): within x3 46.1%, inside P25-P75 49.2% (stated 50%), inside P10-P90 78.1%
-// (stated 80%). Walk-forward: within x3 48.3%, P25-P75 48.3%, P10-P90 75.9%.
+// VALUE (97 peers: traded tokens with mcap >= $1M, tvl > 0, Bridge/CEX categories excluded —
+// microcaps and exchange/bridge caps are not launch comps; response ln(mcap/TVL);
+// miss = exp(mean |log error|); walk-forward prices each newer peer from all older peers):
+//   flat multiple (median ratio) .... LOO x4.657  WF x5.818
+//   + size curve ln(TVL) ............ LOO x3.560  WF x4.510  KEPT
+//   + category ridge (lambda 10) .... LOO x3.543  WF x4.609  tested, not kept (WF worsens)
+//   + 7-day growth .................. LOO x3.660  WF x4.550  tested, not kept
+//   + age ........................... LOO x3.446  WF x4.730  tested, not kept (WF worsens)
+//   + chain count ................... LOO x3.606  WF x4.628  tested, not kept
+// Kept: ln(launch/TVL) = -0.5760 (se .176) - 0.6316 (se .090) * (ln TVL - 17).
+// Range honesty (LOO): within x3 52.6%, inside P25-P75 46.4% (stated 50%), inside P10-P90 79.4%
+// (stated 80%). Walk-forward: within x3 46.9%, P25-P75 40.8%, P10-P90 71.4%.
 //
 // ODDS (logistic on all 758; Brier, 10-fold + walk-forward):
 //   base rate ............ 0.2484 / 0.2814
@@ -74,18 +76,18 @@ export interface ModelConstants {
 }
 
 export const MODEL: ModelConstants = {
-  value_const: -1.1101,
-  value_slope: -0.4891,
-  value_const_se: 0.2071,
-  value_slope_se: 0.0832,
-  resid_q10: -2.493,
-  resid_q25: -1.14,
-  resid_q75: 1.361,
-  resid_q90: 2.032,
-  loo_miss: 4.849,
-  wf_miss: 5.345,
-  flat_loo_miss: 5.926,
-  flat_wf_miss: 7.252,
+  value_const: -0.576,
+  value_slope: -0.6316,
+  value_const_se: 0.176,
+  value_slope_se: 0.09,
+  resid_q10: -1.904,
+  resid_q25: -1.033,
+  resid_q75: 0.987,
+  resid_q90: 1.9,
+  loo_miss: 3.56,
+  wf_miss: 4.51,
+  flat_loo_miss: 4.657,
+  flat_wf_miss: 5.818,
   odds_const: -3.688,
   odds_years: 0.3854,
   odds_catshare: 5.0448,
@@ -94,21 +96,12 @@ export const MODEL: ModelConstants = {
   odds_chains: 0.0897,
   odds_brier: 0.2065,
   odds_brier_base: 0.2484,
-  peers: 128,
+  peers: 97,
   plan_default_usd: 25000,
 };
 
-/** Category offsets from the ridge fit (lambda 10); unseen categories take 0. */
-export const CATEGORY_OFFSETS: Record<string, number> = {
-  'AI Agents': -0.01, 'Basis Trading': 0.433, 'Bridge': -0.047, 'CDP': -0.278, 'CEX': 0.345,
-  'Canonical Bridge': 0.315, 'Chain': 0.178, 'Collateral Management': 0.301, 'Cross Chain Bridge': 0.18,
-  'DOR': -0.084, 'Decentralized AI': 0.19, 'Derivatives': 0.212, 'Dexs': 0.044, 'Dual-Token Stablecoin': -0.16,
-  'Indexes': -0.028, 'Launchpad': -0.006, 'Lending': -0.372, 'Leveraged Farming': -0.005,
-  'Liquid Restaking': -0.211, 'Liquid Staking': -0.481, 'Liquidity Manager': -0.318, 'NFT Marketplace': 0.123,
-  'Onchain Capital Allocator': -0.262, 'Options': 0.09, 'Payments': -0.208, 'Prediction Market': 0.588,
-  'Privacy': 0.262, 'RWA': 0.071, 'Restaking': -0.029, 'Risk Curators': 0.168, 'Staking Pool': -0.513,
-  'Token Locker': 0.198, 'Yield': -0.364, 'Yield Aggregator': -0.321,
-};
+/** Category offsets: tested on the 97-peer set, not kept (walk-forward worsens), so all zero. */
+export const CATEGORY_OFFSETS: Record<string, number> = {};
 
 /** Shrunk category token shares (k=10 toward the global 0.5488), fitted on all 758. */
 export const CATEGORY_SHARES: Record<string, number> = {
@@ -126,7 +119,7 @@ export const CATEGORY_SHARES: Record<string, number> = {
   'Uncollateralized Lending': 0.499, 'Yield': 0.581, 'Yield Aggregator': 0.591,
 };
 
-export const MODEL_VERSION = 'radar-3-fitted';
+export const MODEL_VERSION = 'radar-4-fitted';
 export const EARLY_ROWS = 400;
 export const LIVE_ROWS = 24;
 
