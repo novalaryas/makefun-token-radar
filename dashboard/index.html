@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols ranked by fitted launch value</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>Token Radar</h1>
+  <p class="sub">Pre-token protocols ranked by implied launch value, fitted on this snapshot's own token-bearing peers. Every term below survived a held-out test; every dropped term is named.</p>
+  <div id="integrity" class="strip"></div>
+</header>
+<nav>
+  <button data-view="board" class="on">Board</button>
+  <button data-view="detail">Protocol detail</button>
+  <button data-view="filter">Filtered view</button>
+  <button data-view="method">Method &amp; tests</button>
+</nav>
+<main>
+  <section id="view-board"></section>
+  <section id="view-detail" hidden></section>
+  <section id="view-filter" hidden></section>
+  <section id="view-method" hidden></section>
+</main>
+<footer>Static page. Data: the sealed snapshot named in the strip above. No network calls; open it offline.</footer>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
