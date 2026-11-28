@@ -1,18 +1,21 @@
-// Token radar model v4. Two fitted models, every term kept only if it lowers held-out miss in
+// Token radar model v5. Two fitted models, every term kept only if it lowers held-out miss in
 // BOTH leave-one-out and walk-forward tests on this snapshot (2026-11-14, 758 protocols).
+// Walk-forward prices each dated peer from all peers listed earlier (minimum 20 training peers).
 //
-// VALUE (97 peers: traded tokens with mcap >= $1M, tvl > 0, Bridge/CEX categories excluded —
-// microcaps and exchange/bridge caps are not launch comps; response ln(mcap/TVL);
-// miss = exp(mean |log error|); walk-forward prices each newer peer from all older peers):
-//   flat multiple (median ratio) .... LOO x4.657  WF x5.818
-//   + size curve ln(TVL) ............ LOO x3.560  WF x4.510  KEPT
-//   + category ridge (lambda 10) .... LOO x3.543  WF x4.609  tested, not kept (WF worsens)
-//   + 7-day growth .................. LOO x3.660  WF x4.550  tested, not kept
-//   + age ........................... LOO x3.446  WF x4.730  tested, not kept (WF worsens)
-//   + chain count ................... LOO x3.606  WF x4.628  tested, not kept
-// Kept: ln(launch/TVL) = -0.5760 (se .176) - 0.6316 (se .090) * (ln TVL - 17).
-// Range honesty (LOO): within x3 52.6%, inside P25-P75 46.4% (stated 50%), inside P10-P90 79.4%
-// (stated 80%). Walk-forward: within x3 46.9%, P25-P75 40.8%, P10-P90 71.4%.
+// VALUE (68 peers: traded tokens with mcap >= $5M, tvl > 0, Bridge/Canonical Bridge/CEX excluded —
+// sub-$5M caps are not launch comps for these protocols; response ln(mcap/TVL);
+// miss = exp(mean |log error|); fit is least-absolute-deviation, which targets the miss metric):
+//   flat multiple (median ratio) .... LOO x5.716  WF x5.621
+//   + size curve ln(TVL) ............ LOO x2.982  WF x2.977  KEPT
+//   + quadratic ln(TVL) ............. LOO x3.058  WF x3.190  tested, not kept
+//   + category ridge (lambda 30) .... LOO x3.004  WF x2.998  tested, not kept (LOO worsens)
+//   + age ........................... LOO x3.024  WF x3.012  tested, not kept
+//   + 7-day growth .................. LOO x3.084  WF x3.177  tested, not kept
+//   + chain count ................... LOO x3.031  WF x2.966  tested, not kept (LOO worsens)
+// Kept: ln(launch/TVL) = -0.3729 (bootstrap se .284) - 0.7773 (se .106) * (ln TVL - 17).
+// Intervals are conformal-style: offsets are the leave-one-out residuals' own quantiles.
+// Range honesty (LOO): within x3 67.6%, inside P25-P75 51.5% (stated 50%), inside P10-P90 82.4%
+// (stated 80%). Walk-forward: within x3 67.6%, P25-P75 52.9%, P10-P90 79.4%.
 //
 // ODDS (logistic on all 758; Brier, 10-fold + walk-forward):
 //   base rate ............ 0.2484 / 0.2814
@@ -25,9 +28,13 @@
 // 2-3y 55%, 3y+ 79% of dated protocols recording a token.
 //
 // IMPLIED = launch value x token odds. FARM VERDICT is scenario math (printed on the page):
-// expected drop = implied x (plan / (TVL + plan)) x 5 early-activity factor; net subtracts
-// gas/fees and a 5%/yr capital charge; $/hour divides by active hours. FARM >= $10/h net,
-// MARGINAL > $0, SKIP otherwise, at the default $25,000 plan.
+// the plan is sized to minimum viable capital — 0.5% of TVL, floored at $1,000, capped at
+// $25,000 — because a $25,000 ticket would swamp a small protocol's TVL and flatter the maths.
+// expected drop = implied x 10% community pool x share, where share = plan / (plan + 2% of TVL)
+// capped at 0.2% per wallet — points split among active farmer capital (taken as 2% of TVL)
+// and no single wallet takes more than a fifth of a percent of the pool; net subtracts gas/fees,
+// an 8%/yr capital charge and a 5% risk premium on the ticket (lockup and contract risk are
+// real costs); $/hour divides by active hours. FARM >= $15/h net, MARGINAL > $0, SKIP otherwise.
 
 export interface SnapshotProtocol {
   slug: string;
@@ -76,18 +83,18 @@ export interface ModelConstants {
 }
 
 export const MODEL: ModelConstants = {
-  value_const: -0.576,
-  value_slope: -0.6316,
-  value_const_se: 0.176,
-  value_slope_se: 0.09,
-  resid_q10: -1.904,
-  resid_q25: -1.033,
-  resid_q75: 0.987,
-  resid_q90: 1.9,
-  loo_miss: 3.56,
-  wf_miss: 4.51,
-  flat_loo_miss: 4.657,
-  flat_wf_miss: 5.818,
+  value_const: -0.3729,
+  value_slope: -0.7773,
+  value_const_se: 0.284,
+  value_slope_se: 0.106,
+  resid_q10: -0.977,
+  resid_q25: -0.717,
+  resid_q75: 1.13,
+  resid_q90: 2.086,
+  loo_miss: 2.982,
+  wf_miss: 2.977,
+  flat_loo_miss: 5.716,
+  flat_wf_miss: 5.621,
   odds_const: -3.688,
   odds_years: 0.3854,
   odds_catshare: 5.0448,
@@ -96,11 +103,11 @@ export const MODEL: ModelConstants = {
   odds_chains: 0.0897,
   odds_brier: 0.2065,
   odds_brier_base: 0.2484,
-  peers: 97,
-  plan_default_usd: 25000,
+  peers: 68,
+  plan_default_usd: 10000,
 };
 
-/** Category offsets: tested on the 97-peer set, not kept (walk-forward worsens), so all zero. */
+/** Category offsets: tested on the 68-peer set, not kept (leave-one-out worsens), so all zero. */
 export const CATEGORY_OFFSETS: Record<string, number> = {};
 
 /** Shrunk category token shares (k=10 toward the global 0.5488), fitted on all 758. */
@@ -119,7 +126,7 @@ export const CATEGORY_SHARES: Record<string, number> = {
   'Uncollateralized Lending': 0.499, 'Yield': 0.581, 'Yield Aggregator': 0.591,
 };
 
-export const MODEL_VERSION = 'radar-4-fitted';
+export const MODEL_VERSION = 'radar-5-fitted';
 export const EARLY_ROWS = 400;
 export const LIVE_ROWS = 24;
 
@@ -296,9 +303,14 @@ function actionFor(p: SnapshotProtocol, plan: number, chain: string): string {
   return `Deposit ${amt} of USDC into ${name} on ${chain} and keep the position open.`;
 }
 
+/** Minimum viable ticket: 0.5% of TVL, floored at $1,000, capped at $25,000. */
+export function planFor(p: SnapshotProtocol): number {
+  return Math.min(25000, Math.max(1000, Math.round(p.tvl_usd * 0.005)));
+}
+
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
-  const plan = MODEL.plan_default_usd;
+  const plan = planFor(p);
   const hold = holdDaysFor(age);
   return [
     { text: `Use a fresh wallet holding only the $${plan.toLocaleString('en-US')} plan funds; keep the seed phrase offline.`, cost: 'under $3 of gas', time: '5 minutes' },
@@ -318,18 +330,18 @@ export function stepText(step: FarmStep): string {
   return s;
 }
 
-/** Scenario budget at the default plan: expected drop, costs, net and net per active hour. */
+/** Scenario budget at the minimum viable plan: expected drop, costs, net and net per active hour. */
 export function farmBudget(p: SnapshotProtocol, implied: number, age: number | null) {
-  const plan = MODEL.plan_default_usd;
+  const plan = planFor(p);
   const hold = holdDaysFor(age);
   const weeks = Math.ceil(hold / 7);
   const activeHours = 0.25 + weeks * (10 / 60) + 10 / 60;
-  const expectedDrop = implied * (plan / (p.tvl_usd + plan)) * 5;
+  const expectedDrop = implied * 0.1 * Math.min(0.002, plan / (plan + p.tvl_usd * 0.02));
   const gasFees = 3 + 8 + 4 + weeks * 2 + 5;
-  const capitalCharge = plan * 0.05 * (hold / 365);
+  const capitalCharge = plan * 0.08 * (hold / 365) + plan * 0.05;
   const net = expectedDrop - gasFees - capitalCharge;
   const perHour = net / activeHours;
-  const verdict: 'FARM' | 'MARGINAL' | 'SKIP' = perHour >= 10 ? 'FARM' : perHour > 0 ? 'MARGINAL' : 'SKIP';
+  const verdict: 'FARM' | 'MARGINAL' | 'SKIP' = perHour >= 15 ? 'FARM' : perHour > 0 ? 'MARGINAL' : 'SKIP';
   return { verdict, perHour: Math.round(perHour * 100) / 100, expectedDrop: Math.round(expectedDrop), gasFees, capitalCharge: Math.round(capitalCharge), net: Math.round(net), plan, hold, activeHours: Math.round(activeHours * 100) / 100 };
 }
 
